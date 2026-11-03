@@ -17,8 +17,13 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
+      # This action runs HACS' own container image (ghcr.io/hacs/action:main), so pinning
+      # the action to a commit would not pin the code that runs. The job only has a
+      # read-only token and no checked-out credentials.
       - name: Run HACS validation
         uses: hacs/action@main
         with:

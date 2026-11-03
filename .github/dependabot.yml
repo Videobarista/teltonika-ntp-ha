@@ -6,3 +6,12 @@ updates:
       interval: monthly
     commit-message:
       prefix: "ci"
+
+  # Keeps the pinned pytest-homeassistant-custom-component (and with it the Home
+  # Assistant release the tests run against) up to date.
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "test"
