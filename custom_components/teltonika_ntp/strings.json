@@ -12,10 +12,10 @@
           "verify_ssl": "Verify SSL certificate"
         },
         "data_description": {
-          "host": "IP address or host name. HTTPS is tried first, then HTTP.",
+          "host": "IP address or host name. HTTPS is used; type http:// in front only if the device has no HTTPS (the password is then sent unencrypted).",
           "username": "A WebUI user. A dedicated read-only user for Home Assistant is recommended.",
           "password": "Password of that user.",
-          "verify_ssl": "Leave off for the device's default self-signed certificate."
+          "verify_ssl": "Leave off for the device's default self-signed certificate: it is then pinned on the first connection, and a different certificate is refused afterwards."
         }
       },
       "dhcp_confirm": {
@@ -51,18 +51,19 @@
           "verify_ssl": "Verify SSL certificate"
         },
         "data_description": {
-          "host": "IP address or host name. HTTPS is tried first, then HTTP.",
+          "host": "IP address or host name. HTTPS is used; type http:// in front only if the device has no HTTPS (the password is then sent unencrypted).",
           "username": "A WebUI user. A dedicated read-only user for Home Assistant is recommended.",
           "password": "Password of that user.",
-          "verify_ssl": "Leave off for the device's default self-signed certificate."
+          "verify_ssl": "Leave off for the device's default self-signed certificate: it is then pinned on the first connection, and a different certificate is refused afterwards."
         },
-        "description": "Change the address or credentials of the device."
+        "description": "Change the address or credentials. This also accepts the certificate the device presents now, for example after a firmware reset replaced it."
       }
     },
     "error": {
       "cannot_connect": "Cannot connect to the device.",
       "invalid_auth": "Invalid username or password.",
-      "unknown": "Unexpected error, see the logs."
+      "unknown": "Unexpected error, see the logs.",
+      "invalid_host": "Enter a host name or IP address, optionally with a port, without a path."
     },
     "abort": {
       "already_configured": "This device is already configured.",
@@ -113,6 +114,16 @@
       "time_problem": {
         "name": "Time sync"
       }
+    }
+  },
+  "issues": {
+    "certificate_mismatch": {
+      "title": "Certificate of {name} changed",
+      "description": "The Teltonika NTP server {name} presented another TLS certificate than the one Home Assistant pinned, so Home Assistant stopped sending it the password.\n\nThis happens after a firmware reset or a certificate renewal on the device, but can also mean that another device is posing as your NTP server.\n\nIf you replaced the certificate yourself, open the integration, choose **Reconfigure** and enter the credentials again to accept the new certificate."
+    },
+    "insecure_http": {
+      "title": "{name} uses unencrypted HTTP",
+      "description": "The connection to {name} is set up with an http:// address, so the WebUI password travels unencrypted over the network.\n\nEnable HTTPS on the device, then open the integration, choose **Reconfigure** and enter the address without http://."
     }
   }
 }

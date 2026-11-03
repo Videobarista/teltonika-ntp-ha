@@ -11,6 +11,7 @@ import logging
 from typing import Any
 
 import voluptuous as vol
+from yarl import URL
 
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME, CONF_VERIFY_SSL
@@ -23,9 +24,20 @@ from homeassistant.helpers.selector import (
     TextSelectorType,
 )
 from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
+from homeassistant.util.ssl import client_context_no_verify
 
-from .api import RutOSClient, TeltonikaAuthError, TeltonikaError, url_variants
-from .const import DOMAIN, SUPPORTED_MODEL_PREFIXES
+from .api import (
+    InvalidHostError,
+    RutOSClient,
+    TeltonikaAuthError,
+    TeltonikaError,
+    async_fetch_certificate_fingerprint,
+    is_https,
+    parse_host,
+    valid_fingerprint,
+)
+from .const import CONF_FINGERPRINT, DOMAIN, SUPPORTED_MODEL_PREFIXES
+from .util import as_dict, clean_text
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -55,6 +67,10 @@ class InvalidAuth(Exception):
     """The credentials were rejected."""
 
 
+class InvalidHost(Exception):
+    """The address is not a valid host, IP address or base URL."""
+
+
 def _entry_for_mac(hass: HomeAssistant, mac: str) -> ConfigEntry | None:
     """Return the entry of this integration whose device has the given MAC address.
 
@@ -70,52 +86,83 @@ def _entry_for_mac(hass: HomeAssistant, mac: str) -> ConfigEntry | None:
     return None
 
 
-def _is_supported(model: str | None) -> bool:
+def _is_supported(model: Any) -> bool:
     """Return True for models this integration is written for."""
-    return bool(model) and str(model).upper().startswith(SUPPORTED_MODEL_PREFIXES)
+    text = clean_text(model)
+    return text is not None and text.upper().startswith(SUPPORTED_MODEL_PREFIXES)
 
 
-async def _async_validate(hass: HomeAssistant, data: Mapping[str, Any]) -> dict[str, str]:
-    """Log in and read the identity of the device.
+def _entry_data(info: Mapping[str, Any], data: Mapping[str, Any]) -> dict[str, Any]:
+    """Build config entry data from validated input; the pin is stored only when used."""
+    entry_data = {
+        CONF_HOST: info["host"],
+        CONF_USERNAME: data[CONF_USERNAME],
+        CONF_PASSWORD: data[CONF_PASSWORD],
+        CONF_VERIFY_SSL: data.get(CONF_VERIFY_SSL, False),
+    }
+    if info["fingerprint"]:
+        entry_data[CONF_FINGERPRINT] = info["fingerprint"]
+    return entry_data
 
-    Tries HTTPS first and falls back to HTTP when no scheme was given.
+
+async def _async_validate(
+    hass: HomeAssistant, data: Mapping[str, Any], pinned: str | None = None
+) -> dict[str, Any]:
+    """Check the address, pin the certificate, log in and read the device identity.
+
+    Without a scheme only HTTPS is tried: the password never falls back to plain HTTP.
+    For HTTPS without CA verification the certificate is pinned first (``pinned`` keeps
+    an existing pin, as in reauthentication), so the login goes to that certificate.
     """
-    session = async_get_clientsession(hass)
-    last_error: Exception | None = None
+    try:
+        base_url = parse_host(data[CONF_HOST])
+    except InvalidHostError as err:
+        raise InvalidHost from err
 
-    for base_url in url_variants(data[CONF_HOST]):
-        client = RutOSClient(
-            session,
-            base_url,
-            data[CONF_USERNAME],
-            data[CONF_PASSWORD],
-            verify_ssl=data.get(CONF_VERIFY_SSL, False),
-        )
-        try:
-            await client.async_get_public_info()
-            status = await client.async_get_device_status()
-        except TeltonikaAuthError as err:
-            raise InvalidAuth from err
-        except TeltonikaError as err:
-            _LOGGER.debug("Cannot use %s: %s", base_url, err)
-            last_error = err
-            continue
-        finally:
-            await client.async_logout()
+    verify_ssl = data.get(CONF_VERIFY_SSL, False)
+    fingerprint: str | None = None
+    if is_https(base_url) and not verify_ssl:
+        fingerprint = valid_fingerprint(pinned)
+        if fingerprint is None:
+            try:
+                fingerprint = await async_fetch_certificate_fingerprint(
+                    base_url, client_context_no_verify()
+                )
+            except TeltonikaError as err:
+                raise CannotConnect from err
 
-        mnf = status.get("mnfinfo") or {}
-        static = status.get("static") or {}
-        serial = mnf.get("serial")
-        if not serial:
-            raise CannotConnect("Device did not report a serial number")
-        return {
-            "host": base_url,
-            "serial": str(serial),
-            "title": static.get("device_name") or static.get("model") or "Teltonika NTP",
-            "model": static.get("model") or mnf.get("name") or "",
-        }
+    client = RutOSClient(
+        async_get_clientsession(hass),
+        base_url,
+        data[CONF_USERNAME],
+        data[CONF_PASSWORD],
+        verify_ssl=verify_ssl,
+        fingerprint=fingerprint,
+    )
+    try:
+        await client.async_get_public_info()
+        status = await client.async_get_device_status()
+    except TeltonikaAuthError as err:
+        raise InvalidAuth from err
+    except TeltonikaError as err:
+        _LOGGER.debug("Cannot use %s: %s", base_url, err)
+        raise CannotConnect from err
+    finally:
+        await client.async_logout()
 
-    raise CannotConnect from last_error
+    mnf = as_dict(status.get("mnfinfo"))
+    static = as_dict(status.get("static"))
+    serial = clean_text(mnf.get("serial"))
+    if not serial:
+        raise CannotConnect("Device did not report a serial number")
+    return {
+        "host": base_url,
+        "fingerprint": fingerprint,
+        "serial": serial,
+        "title": clean_text(static.get("device_name"))
+        or clean_text(static.get("model"))
+        or "Teltonika NTP",
+    }
 
 
 class TeltonikaNtpConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -128,11 +175,13 @@ class TeltonikaNtpConfigFlow(ConfigFlow, domain=DOMAIN):
         self._discovered_host: str | None = None
 
     async def _async_try(
-        self, data: Mapping[str, Any], errors: dict[str, str]
-    ) -> dict[str, str] | None:
+        self, data: Mapping[str, Any], errors: dict[str, str], pinned: str | None = None
+    ) -> dict[str, Any] | None:
         """Validate input and fill ``errors``; return device info on success."""
         try:
-            return await _async_validate(self.hass, data)
+            return await _async_validate(self.hass, data, pinned)
+        except InvalidHost:
+            errors[CONF_HOST] = "invalid_host"
         except CannotConnect:
             errors["base"] = "cannot_connect"
         except InvalidAuth:
@@ -149,9 +198,9 @@ class TeltonikaNtpConfigFlow(ConfigFlow, domain=DOMAIN):
             info = await self._async_try(user_input, errors)
             if info is not None:
                 await self.async_set_unique_id(info["serial"])
-                self._abort_if_unique_id_configured(updates={CONF_HOST: info["host"]})
+                self._abort_if_unique_id_configured()
                 return self.async_create_entry(
-                    title=info["title"], data={**user_input, CONF_HOST: info["host"]}
+                    title=info["title"], data=_entry_data(info, user_input)
                 )
 
         return self.async_show_form(
@@ -162,17 +211,19 @@ class TeltonikaNtpConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_dhcp(self, discovery_info: DhcpServiceInfo) -> ConfigFlowResult:
         """Handle a Teltonika device found through DHCP."""
-        host = discovery_info.ip
-        session = async_get_clientsession(self.hass)
+        try:
+            base_url = parse_host(discovery_info.ip)
+        except InvalidHostError:
+            return self.async_abort(reason="cannot_connect")
 
-        public: dict[str, Any] | None = None
-        for base_url in url_variants(host):
-            try:
-                public = await RutOSClient(session, base_url, "", "").async_get_public_info()
-                break
-            except TeltonikaError:
-                continue
-        if public is None:
+        # Read only the public status here: no credentials are sent before the user
+        # confirms, and that confirmation pins the certificate.
+        try:
+            public = await RutOSClient(
+                async_get_clientsession(self.hass), base_url, "", ""
+            ).async_get_public_info()
+        except TeltonikaError as err:
+            _LOGGER.debug("Discovered device at %s did not answer: %s", base_url, err)
             return self.async_abort(reason="cannot_connect")
 
         # The core "teltonika" integration handles routers; only take NTP servers.
@@ -183,10 +234,12 @@ class TeltonikaNtpConfigFlow(ConfigFlow, domain=DOMAIN):
         # device that is already set up by its MAC address instead.
         mac = dr.format_mac(discovery_info.macaddress)
         if (entry := _entry_for_mac(self.hass, mac)) is not None:
-            if entry.data.get(CONF_HOST) != base_url:
-                # The device got a new address: follow it.
+            stored = URL(entry.data[CONF_HOST])
+            if stored.host != discovery_info.ip:
+                # The device got a new address: follow it, keeping scheme and port.
                 self.hass.config_entries.async_update_entry(
-                    entry, data={**entry.data, CONF_HOST: base_url}
+                    entry,
+                    data={**entry.data, CONF_HOST: str(stored.with_host(discovery_info.ip))},
                 )
                 self.hass.config_entries.async_schedule_reload(entry.entry_id)
             return self.async_abort(reason="already_configured")
@@ -194,9 +247,9 @@ class TeltonikaNtpConfigFlow(ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(mac)
         self._abort_if_unique_id_configured()
 
-        self._discovered_host = host
-        name = public.get("device_name") or "Teltonika NTP"
-        self.context["title_placeholders"] = {"name": str(name), "host": host}
+        self._discovered_host = discovery_info.ip
+        name = clean_text(public.get("device_name")) or "Teltonika NTP"
+        self.context["title_placeholders"] = {"name": name, "host": discovery_info.ip}
         return await self.async_step_dhcp_confirm()
 
     async def async_step_dhcp_confirm(
@@ -209,10 +262,8 @@ class TeltonikaNtpConfigFlow(ConfigFlow, domain=DOMAIN):
             info = await self._async_try(data, errors)
             if info is not None:
                 await self.async_set_unique_id(info["serial"], raise_on_progress=False)
-                self._abort_if_unique_id_configured(updates={CONF_HOST: info["host"]})
-                return self.async_create_entry(
-                    title=info["title"], data={**data, CONF_HOST: info["host"]}
-                )
+                self._abort_if_unique_id_configured()
+                return self.async_create_entry(title=info["title"], data=_entry_data(info, data))
 
         return self.async_show_form(
             step_id="dhcp_confirm",
@@ -228,16 +279,16 @@ class TeltonikaNtpConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_reauth_confirm(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Ask for new credentials."""
+        """Ask for new credentials; the pinned certificate stays the same."""
         errors: dict[str, str] = {}
         entry = self._get_reauth_entry()
         if user_input is not None:
             data = {**entry.data, **user_input}
-            info = await self._async_try(data, errors)
+            info = await self._async_try(data, errors, pinned=entry.data.get(CONF_FINGERPRINT))
             if info is not None:
                 await self.async_set_unique_id(info["serial"])
                 self._abort_if_unique_id_mismatch(reason="wrong_device")
-                return self.async_update_reload_and_abort(entry, data_updates=user_input)
+                return self.async_update_reload_and_abort(entry, data=_entry_data(info, data))
 
         return self.async_show_form(
             step_id="reauth_confirm",
@@ -251,7 +302,7 @@ class TeltonikaNtpConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Change the address or credentials of an existing entry."""
+        """Change the address or credentials; this also pins the current certificate."""
         errors: dict[str, str] = {}
         entry = self._get_reconfigure_entry()
         if user_input is not None:
@@ -259,14 +310,15 @@ class TeltonikaNtpConfigFlow(ConfigFlow, domain=DOMAIN):
             if info is not None:
                 await self.async_set_unique_id(info["serial"])
                 self._abort_if_unique_id_mismatch(reason="wrong_device")
-                return self.async_update_reload_and_abort(
-                    entry, data_updates={**user_input, CONF_HOST: info["host"]}
-                )
+                return self.async_update_reload_and_abort(entry, data=_entry_data(info, user_input))
 
+        suggested = {
+            CONF_HOST: entry.data.get(CONF_HOST),
+            CONF_USERNAME: entry.data.get(CONF_USERNAME),
+            CONF_VERIFY_SSL: entry.data.get(CONF_VERIFY_SSL, False),
+        }
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=self.add_suggested_values_to_schema(
-                USER_SCHEMA, user_input or {**entry.data, CONF_PASSWORD: ""}
-            ),
+            data_schema=self.add_suggested_values_to_schema(USER_SCHEMA, user_input or suggested),
             errors=errors,
         )

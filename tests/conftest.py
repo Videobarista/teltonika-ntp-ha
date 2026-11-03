@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.teltonika_ntp.const import DOMAIN
+from custom_components.teltonika_ntp.const import CONF_FINGERPRINT, DOMAIN
 from custom_components.teltonika_ntp.ntp import NtpResult
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME, CONF_VERIFY_SSL
 
@@ -18,6 +18,8 @@ HOST = "192.0.2.10"
 BASE_URL = f"https://{HOST}"
 SERIAL = "1234567890"
 MAC = "20:97:27:00:00:01"
+FINGERPRINT = "ab" * 32
+NEW_FINGERPRINT = "cd" * 32
 
 PUBLIC_INFO: dict[str, Any] = {
     "lang": "en",
@@ -46,6 +48,7 @@ ENTRY_DATA: dict[str, Any] = {
     CONF_USERNAME: "homeassistant",
     CONF_PASSWORD: "secret",
     CONF_VERIFY_SSL: False,
+    CONF_FINGERPRINT: FINGERPRINT,
 }
 
 NTP_SYNCHRONIZED = NtpResult(
@@ -82,13 +85,35 @@ def _make_client() -> MagicMock:
 
 @pytest.fixture
 def mock_client() -> Generator[MagicMock]:
-    """Patch the RutOS client everywhere it is created; return the shared instance."""
+    """Patch the RutOS client everywhere it is created; return the shared instance.
+
+    ``client.flow_class`` and ``client.setup_class`` are the patched classes, so tests
+    can check how the client was created (address, TLS settings, pinned certificate).
+    """
     client = _make_client()
     with (
-        patch("custom_components.teltonika_ntp.config_flow.RutOSClient", return_value=client),
-        patch("custom_components.teltonika_ntp.RutOSClient", return_value=client),
+        patch(
+            "custom_components.teltonika_ntp.config_flow.RutOSClient", return_value=client
+        ) as flow_class,
+        patch("custom_components.teltonika_ntp.RutOSClient", return_value=client) as setup_class,
     ):
+        client.flow_class = flow_class
+        client.setup_class = setup_class
         yield client
+
+
+@pytest.fixture(autouse=True)
+def mock_fingerprint() -> Generator[AsyncMock]:
+    """Patch reading the device certificate; no test opens a real TLS connection."""
+    fetch = AsyncMock(return_value=FINGERPRINT)
+    with (
+        patch(
+            "custom_components.teltonika_ntp.config_flow.async_fetch_certificate_fingerprint",
+            new=fetch,
+        ),
+        patch("custom_components.teltonika_ntp.async_fetch_certificate_fingerprint", new=fetch),
+    ):
+        yield fetch
 
 
 @pytest.fixture

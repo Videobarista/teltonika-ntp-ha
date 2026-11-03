@@ -1,2 +1,2 @@
 # Test dependencies. The plugin pins the Home Assistant release the tests run against.
-pytest-homeassistant-custom-component==0.13.371
+pytest-homeassistant-custom-component==0.13.375

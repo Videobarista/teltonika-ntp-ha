@@ -1,7 +1,7 @@
 {
   "domain": "teltonika_ntp",
   "name": "Teltonika NTP Server",
-  "codeowners": ["@HuisAutomatisering"],
+  "codeowners": ["@Videobarista"],
   "config_flow": true,
   "dhcp": [
     {
@@ -11,10 +11,10 @@
       "macaddress": "001E42*"
     }
   ],
-  "documentation": "https://github.com/HuisAutomatisering/teltonika-ntp-ha",
+  "documentation": "https://github.com/Videobarista/teltonika-ntp-ha",
   "integration_type": "device",
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/HuisAutomatisering/teltonika-ntp-ha/issues",
+  "issue_tracker": "https://github.com/Videobarista/teltonika-ntp-ha/issues",
   "requirements": [],
-  "version": "1.2.0"
+  "version": "1.3.0"
 }

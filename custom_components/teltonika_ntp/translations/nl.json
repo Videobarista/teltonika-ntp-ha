@@ -12,10 +12,10 @@
           "verify_ssl": "SSL-certificaat controleren"
         },
         "data_description": {
-          "host": "IP-adres of hostnaam. Eerst wordt HTTPS geprobeerd, daarna HTTP.",
+          "host": "IP-adres of hostnaam. Er wordt HTTPS gebruikt; zet er alleen http:// voor als het apparaat geen HTTPS heeft (het wachtwoord gaat dan onversleuteld over het netwerk).",
           "username": "Een WebUI-gebruiker. Een aparte alleen-lezen gebruiker voor Home Assistant is aan te raden.",
           "password": "Wachtwoord van die gebruiker.",
-          "verify_ssl": "Laat uit voor het standaard self-signed certificaat van het apparaat."
+          "verify_ssl": "Laat uit voor het standaard self-signed certificaat van het apparaat: dat wordt bij de eerste verbinding vastgelegd, en een ander certificaat wordt daarna geweigerd."
         }
       },
       "dhcp_confirm": {
@@ -51,18 +51,19 @@
           "verify_ssl": "SSL-certificaat controleren"
         },
         "data_description": {
-          "host": "IP-adres of hostnaam. Eerst wordt HTTPS geprobeerd, daarna HTTP.",
+          "host": "IP-adres of hostnaam. Er wordt HTTPS gebruikt; zet er alleen http:// voor als het apparaat geen HTTPS heeft (het wachtwoord gaat dan onversleuteld over het netwerk).",
           "username": "Een WebUI-gebruiker. Een aparte alleen-lezen gebruiker voor Home Assistant is aan te raden.",
           "password": "Wachtwoord van die gebruiker.",
-          "verify_ssl": "Laat uit voor het standaard self-signed certificaat van het apparaat."
+          "verify_ssl": "Laat uit voor het standaard self-signed certificaat van het apparaat: dat wordt bij de eerste verbinding vastgelegd, en een ander certificaat wordt daarna geweigerd."
         },
-        "description": "Wijzig het adres of de inloggegevens van het apparaat."
+        "description": "Wijzig het adres of de inloggegevens. Dit accepteert ook het certificaat dat het apparaat nu toont, bijvoorbeeld na een firmware-reset."
       }
     },
     "error": {
       "cannot_connect": "Kan geen verbinding maken met het apparaat.",
       "invalid_auth": "Ongeldige gebruikersnaam of wachtwoord.",
-      "unknown": "Onverwachte fout, zie de logs."
+      "unknown": "Onverwachte fout, zie de logs.",
+      "invalid_host": "Vul een hostnaam of IP-adres in, eventueel met poort, zonder pad."
     },
     "abort": {
       "already_configured": "Dit apparaat is al ingesteld.",
@@ -113,6 +114,16 @@
       "time_problem": {
         "name": "Tijdsynchronisatie"
       }
+    }
+  },
+  "issues": {
+    "certificate_mismatch": {
+      "title": "Certificaat van {name} gewijzigd",
+      "description": "De Teltonika NTP-server {name} toont een ander TLS-certificaat dan het certificaat dat Home Assistant heeft vastgelegd. Home Assistant stuurt daarom geen wachtwoord meer naar het apparaat.\n\nDit gebeurt na een firmware-reset of een nieuw certificaat op het apparaat, maar het kan ook betekenen dat een ander apparaat zich voordoet als jouw NTP-server.\n\nHeb je het certificaat zelf vervangen? Open dan de integratie, kies **Opnieuw configureren** en vul de inloggegevens opnieuw in om het nieuwe certificaat te accepteren."
+    },
+    "insecure_http": {
+      "title": "{name} gebruikt onversleuteld HTTP",
+      "description": "De verbinding met {name} is ingesteld met een http://-adres, waardoor het WebUI-wachtwoord onversleuteld over het netwerk gaat.\n\nZet HTTPS aan op het apparaat, open daarna de integratie, kies **Opnieuw configureren** en vul het adres in zonder http://."
     }
   }
 }

@@ -8,9 +8,14 @@ select = [
   "E",   # pycodestyle errors
   "F",   # pyflakes
   "I",   # isort
+  "S",   # flake8-bandit (security)
   "UP",  # pyupgrade
   "W",   # pycodestyle warnings
 ]
+
+[lint.per-file-ignores]
+# Tests use plain asserts and dummy credentials.
+"tests/**" = ["S101", "S105", "S106"]
 
 [lint.isort]
 force-sort-within-sections = true
