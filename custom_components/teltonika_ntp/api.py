@@ -11,7 +11,7 @@ Security notes:
 
 - Credentials are only sent over HTTPS to a certificate that is either verified by a
   trusted CA or pinned by its SHA-256 fingerprint (trust on first use), or over plain
-  HTTP when the user explicitly configured an ``http://`` address.
+  HTTP when the user explicitly configured an address with the http scheme.
 - Everything the device returns is treated as untrusted: bodies are size-limited,
   JSON types are checked and text is cleaned before it is used or logged.
 """
@@ -53,6 +53,9 @@ _TOKEN_LIFETIME_DEFAULT = 299.0
 _TOKEN_LIFETIME_MAX = 3600.0
 
 MAX_HOST_LENGTH = 253
+# Longest accepted input: a host plus scheme, port and trailing slash
+# ("https" + "://" + ":65535" + "/" is 15 characters).
+MAX_INPUT_LENGTH = MAX_HOST_LENGTH + 15
 
 
 class TeltonikaError(Exception):
@@ -87,13 +90,13 @@ class InvalidHostError(ValueError):
 def parse_host(host: str) -> str:
     """Validate user input and return ``scheme://host[:port]``.
 
-    Accepts a host name or IP address, optionally with a port, or a base URL with an
-    ``http://`` or ``https://`` scheme. Without a scheme HTTPS is used; HTTP is only
-    used when the user typed it. Paths, queries, fragments and credentials in the
+    Accepts a host name or IP address, optionally with a port, or a base URL with the
+    http or https scheme. Without a scheme HTTPS is used; HTTP is only used when the
+    user typed it. Paths, queries, fragments and credentials in the
     address are refused.
     """
     value = host.strip() if isinstance(host, str) else ""
-    if not value or len(value) > MAX_HOST_LENGTH + len("https://:65535/"):
+    if not value or len(value) > MAX_INPUT_LENGTH:
         raise InvalidHostError("empty or too long")
     if any(char.isspace() or not char.isprintable() for char in value):
         raise InvalidHostError("contains whitespace or control characters")

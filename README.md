@@ -8,6 +8,8 @@
 
 [![HACS custom](https://img.shields.io/badge/HACS-custom-41BDF5.svg)](https://hacs.xyz/docs/faq/custom_repositories)
 [![Quality scale: Bronze (aligned)](https://img.shields.io/badge/quality%20scale-bronze%20(aligned)-cd7f32.svg)](https://developers.home-assistant.io/docs/core/integration-quality-scale/)
+[![Local only](https://github.com/Videobarista/teltonika-ntp-ha/actions/workflows/local-only.yml/badge.svg?branch=main)](https://github.com/Videobarista/teltonika-ntp-ha/actions/workflows/local-only.yml)
+[![IoT class](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FVideobarista%2Fteltonika-ntp-ha%2Fmain%2Fcustom_components%2Fteltonika_ntp%2Fmanifest.json&query=%24.iot_class&label=IoT%20class&color=41BDF5)](#local-only)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Code style: Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![Release](https://img.shields.io/github/v/release/Videobarista/teltonika-ntp-ha?display_name=tag)](https://github.com/Videobarista/teltonika-ntp-ha/releases)
@@ -167,6 +169,29 @@ On top of that, the integration does what it can on its side:
 - **Privacy.** Passwords and tokens are never logged. Diagnostics leave out the username,
   password, address, certificate fingerprint, serial number and MAC addresses.
 - **No extra packages.** The integration uses only what Home Assistant ships with.
+
+### Local only
+
+The integration only talks to your NTP server, never to the internet or any other
+service. Two automated checks back the **Local only** badge:
+
+- `scripts/check_local_only.py` (the badge's workflow) reads the manifest and the code:
+  local IoT class, no cloud, webhook or MQTT, no extra Python packages, no listeners or
+  webhooks, no private HTTP sessions or service calls, connections only from `api.py`
+  (the RutOS API and the certificate check) and `ntp.py` (one UDP query to the device's
+  NTP port), and no hard-coded internet addresses. Every address comes from your
+  configuration.
+- The tests run the real client against a fake device and record every HTTP request,
+  TLS connection and NTP query during the config flow, setup, polling, a manual
+  refresh, reauthentication and reconfiguration. All of them must go to the configured
+  host: the API and certificate check to the configured port, NTP to port 123. Real
+  network access is blocked in the tests, so anything else would fail.
+
+The **IoT class** badge shows the class declared in the manifest (`local_polling`: the
+integration polls the device over the local network).
+
+This covers the integration itself; what Home Assistant does (for example its optional
+analytics) is up to your Home Assistant settings.
 
 ### Network advice
 
