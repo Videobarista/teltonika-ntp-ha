@@ -1,0 +1,22 @@
+name: Local only
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  local-only:
+    name: Local only
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Standard library only: nothing is installed.
+      - name: Check that the integration only talks to its own device
+        run: python3 scripts/check_local_only.py
